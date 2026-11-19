@@ -1,11 +1,11 @@
-// D1 읽기·쓰기 한 곳. 도장 수는 따로 세어 두지 않고 `stamps` 줄을 센다(두 값이 어긋날 일이 없게).
+// 읽기·쓰기 한 곳(Durable Object 안의 SQLite, 테스트는 node:sqlite). 도장 수는 따로 세어 두지 않고 `stamps` 줄을 센다(두 값이 어긋날 일이 없게).
 
 import { CONFIG } from './config.js';
 import { digits, validPhone } from './phone.js';
 
 type Meta = { meta?: { changes?: number; rows_written?: number } | null };
 
-/** D1 에서 이 파일이 쓰는 표면만 */
+/** 이 파일이 쓰는 표면만(D1 과 같은 모양이라 저장소를 바꿔도 이 파일은 그대로다) */
 export interface Db {
   prepare(sql: string): Stmt;
   batch(stmts: Stmt[]): Promise<Meta[]>;
@@ -153,22 +153,28 @@ export async function getMember(db: Db, id: number): Promise<MemberDetail | null
   };
 }
 
-/** 도장 하나. 카드가 다 찼으면 찍지 않는다(false). 두 기기가 동시에 눌러도 칸 수를 넘지 않는다 */
-export async function addStamp(db: Db, id: number, now: number): Promise<boolean> {
+/**
+ * 도장 n개를 한 번에(서비스로 더 줄 때, 소유자 2026-11-19). 칸이 모자라면 하나도 찍지 않는다(false).
+ * 한 문장이라 두 기기가 동시에 눌러도 칸 수를 넘지 않는다.
+ */
+export async function addStamps(db: Db, id: number, n: number, now: number): Promise<boolean> {
+  if (!Number.isInteger(n) || n < 1 || n > CONFIG.goal) throw new InputError(`도장은 한 번에 1~${CONFIG.goal}개예요`, 'count');
   const r = await db.prepare(`
     INSERT INTO stamps (card_id, member_id, at)
-    SELECT c.id, c.member_id, ? FROM cards c
+    WITH RECURSIVE seq(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM seq WHERE k < ?)
+    SELECT c.id, c.member_id, ? FROM cards c, seq
      WHERE c.member_id = ? AND c.rewarded_at IS NULL
-       AND (SELECT COUNT(*) FROM stamps s WHERE s.card_id = c.id) < ?`).bind(now, id, CONFIG.goal).run();
+       AND (SELECT COUNT(*) FROM stamps s WHERE s.card_id = c.id) + ? <= ?`).bind(n, now, id, n, CONFIG.goal).run();
   return changed(r) > 0;
 }
 
-/** 지금 카드의 마지막 도장 하나를 지운다(잘못 눌렀을 때). 지울 것이 없으면 false */
-export async function removeStamp(db: Db, id: number): Promise<boolean> {
+/** 지금 카드의 마지막 도장 n개를 지운다(잘못 눌렀을 때 · 방금 찍은 것 되돌리기). 지울 것이 없으면 false */
+export async function removeStamps(db: Db, id: number, n = 1): Promise<boolean> {
+  if (!Number.isInteger(n) || n < 1 || n > CONFIG.goal) throw new InputError(`도장은 한 번에 1~${CONFIG.goal}개예요`, 'count');
   const r = await db.prepare(`
-    DELETE FROM stamps WHERE id = (
+    DELETE FROM stamps WHERE id IN (
       SELECT s.id FROM stamps s JOIN cards c ON c.id = s.card_id
-       WHERE c.member_id = ? AND c.rewarded_at IS NULL ORDER BY s.at DESC, s.id DESC LIMIT 1)`).bind(id).run();
+       WHERE c.member_id = ? AND c.rewarded_at IS NULL ORDER BY s.at DESC, s.id DESC LIMIT ?)`).bind(id, n).run();
   return changed(r) > 0;
 }
 

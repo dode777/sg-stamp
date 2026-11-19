@@ -1,80 +1,33 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { fakeD1, type FakeD1 } from './support/d1.js';
-import { api, type Env } from '../src/index.js';
+import { api } from '../src/api.js';
+import type { Db } from '../src/store.js';
 import { CONFIG } from '../src/config.js';
 import { formatPhone } from '../src/phone.js';
 
 const ORIGIN = 'https://sg.isocompany.co.kr';
-const PIN = '482915';
 let db: FakeD1;
 let now: number;
-let cookie = '';
-const env = (pin: string | undefined = PIN) => ({ DB: db, STORE_PIN: pin }) as unknown as Env;
 
-async function call(method: string, path: string, body?: unknown, opts: { cookie?: string; origin?: string; ip?: string; pin?: string } = {}) {
-  const headers: Record<string, string> = { 'content-type': 'application/json', 'cf-connecting-ip': opts.ip ?? '1.2.3.4' };
+async function call(method: string, path: string, body?: unknown, opts: { origin?: string } = {}) {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (method !== 'GET') headers.origin = opts.origin ?? ORIGIN;
-  const c = opts.cookie ?? cookie;
-  if (c) headers.cookie = c;
   const req = new Request(`${ORIGIN}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const res = await api(req, new URL(req.url), env(opts.pin ?? PIN), now);
-  return { status: res.status, body: await res.json() as Record<string, any>, setCookie: res.headers.get('set-cookie') };
+  const res = await api(req, new URL(req.url), db as unknown as Db, now);
+  return { status: res.status, body: await res.json() as Record<string, any> };
 }
 
-async function signIn() {
-  const r = await call('POST', '/api/login', { pin: PIN }, { cookie: '' });
-  cookie = r.setCookie!.split(';')[0]!;
-}
-
-beforeEach(async () => { db = fakeD1(); now = Date.UTC(2026, 10, 19, 1, 0, 0); cookie = ''; });
+beforeEach(() => { db = fakeD1(); now = Date.UTC(2026, 10, 19, 1, 0, 0); });
 afterEach(() => db.close());
 
-describe('PIN 로그인', () => {
-  it('맞는 PIN 은 30일짜리 쿠키를 주고, 그 쿠키로 API 가 열린다', async () => {
-    expect((await call('GET', '/api/members')).status).toBe(401);
-    const r = await call('POST', '/api/login', { pin: PIN });
-    expect(r.status).toBe(200);
-    expect(r.setCookie).toMatch(/HttpOnly; Secure; SameSite=Strict; Max-Age=2592000/);
-    cookie = r.setCookie!.split(';')[0]!;
+describe('바깥 요청', () => {
+  it('다른 사이트에서 보낸 쓰기 요청은 거절한다(읽기는 된다)', async () => {
+    expect((await call('POST', '/api/members', { name: '김', phone: '01012345678' }, { origin: 'https://evil.example' })).status).toBe(403);
     expect((await call('GET', '/api/members')).status).toBe(200);
-    now += CONFIG.sessionDays * 86_400_000 + 1;
-    expect((await call('GET', '/api/members')).status).toBe(401);
-  });
-
-  it('PIN 을 바꾸면 전에 받은 쿠키는 쓸 수 없다', async () => {
-    await signIn();
-    expect((await call('GET', '/api/members', undefined, { pin: '000111' })).status).toBe(401);
-  });
-
-  it('위조한 쿠키는 통과하지 못한다', async () => {
-    await signIn();
-    const [exp, sig] = cookie.split('=')[1]!.split('.');
-    const longer = `sg_session=${Number(exp) + 86_400_000}.${sig}`;
-    expect((await call('GET', '/api/members', undefined, { cookie: longer })).status).toBe(401);
-  });
-
-  it(`${CONFIG.maxFails}번 틀리면 그 IP 는 ${CONFIG.lockMinutes}분 막히고, 맞는 PIN 도 그동안은 막힌다`, async () => {
-    for (let i = 1; i < CONFIG.maxFails; i++) {
-      const r = await call('POST', '/api/login', { pin: '1111' });
-      expect(r.status).toBe(401);
-      expect(r.body.error).toContain(`${CONFIG.maxFails - i}번 더`);
-    }
-    expect((await call('POST', '/api/login', { pin: '1111' })).status).toBe(429);
-    expect((await call('POST', '/api/login', { pin: PIN })).status).toBe(429);
-    expect((await call('POST', '/api/login', { pin: PIN }, { ip: '5.6.7.8' })).status).toBe(200);
-    now += CONFIG.lockMinutes * 60_000;
-    expect((await call('POST', '/api/login', { pin: PIN })).status).toBe(200);
-  });
-
-  it('다른 사이트에서 온 요청과 PIN 이 없는 설정은 거절한다', async () => {
-    expect((await call('POST', '/api/login', { pin: PIN }, { origin: 'https://evil.example' })).status).toBe(403);
-    const req = new Request(`${ORIGIN}/api/login`, { method: 'POST', headers: { origin: ORIGIN }, body: JSON.stringify({ pin: PIN }) });
-    expect((await api(req, new URL(req.url), { DB: db } as unknown as Env, now)).status).toBe(503);
   });
 });
 
 describe('회원', () => {
-  beforeEach(signIn);
 
   it('등록하면 빈 카드가 생기고, 번호는 숫자만 저장한다', async () => {
     const r = await call('POST', '/api/members', { name: ' 김  민수 ', phone: '010-1234-5678', memo: '주말' });
@@ -129,7 +82,6 @@ describe('회원', () => {
 });
 
 describe('도장과 보상', () => {
-  beforeEach(signIn);
   const make = async () => (await call('POST', '/api/members', { name: '김민수', phone: '01012345678' })).body.id as number;
 
   it(`${CONFIG.goal}칸을 넘겨 찍을 수 없고, 다 차야 보상할 수 있다`, async () => {
@@ -146,6 +98,31 @@ describe('도장과 보상', () => {
     // 보상을 두 번 누르면 두 번째는 거절(새 카드는 비어 있다)
     expect((await call('POST', `/api/members/${id}/reward`)).status).toBe(409);
     expect(db.raw('SELECT COUNT(*) AS n FROM cards WHERE rewarded_at IS NULL')[0]!.n).toBe(1);
+  });
+
+  it('한 번에 여러 개를 찍을 수 있다(서비스). 남은 칸보다 많으면 하나도 찍지 않고 남은 칸을 알려 준다', async () => {
+    const id = await make();
+    expect((await call('POST', `/api/members/${id}/stamp`, { count: 3 })).body).toMatchObject({ count: 3, stamps: [now, now, now] });
+    expect((await call('POST', `/api/members/${id}/stamp`, { count: 25 })).body.count).toBe(28);
+    const over = await call('POST', `/api/members/${id}/stamp`, { count: 3 });
+    expect(over.status).toBe(409);
+    expect(over.body.error).toBe('2칸 남았어요. 2개까지 찍을 수 있어요');
+    expect((await call('GET', `/api/members/${id}`)).body.count).toBe(28);
+    expect((await call('POST', `/api/members/${id}/stamp`, { count: 2 })).body.count).toBe(CONFIG.goal);
+  });
+
+  it('방금 찍은 여러 개를 한 번에 되돌린다', async () => {
+    const id = await make();
+    await call('POST', `/api/members/${id}/stamp`, { count: 2 });
+    now += 1000;
+    await call('POST', `/api/members/${id}/stamp`, { count: 3 });
+    expect((await call('POST', `/api/members/${id}/unstamp`, { count: 3 })).body).toMatchObject({ count: 2, stamps: [now - 1000, now - 1000] });
+  });
+
+  it('찍는 개수는 1 이상의 정수만', async () => {
+    const id = await make();
+    for (const count of [0, -1, 1.5, 'x', CONFIG.goal + 1]) expect((await call('POST', `/api/members/${id}/stamp`, { count })).status).toBe(400);
+    expect(db.raw('SELECT COUNT(*) AS n FROM stamps')[0]!.n).toBe(0);
   });
 
   it('잘못 찍은 도장은 마지막 것부터 지운다. 보상한 카드의 도장은 지우지 않는다', async () => {

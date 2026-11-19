@@ -1,38 +1,42 @@
 # sg-stamp: 세션 작업 지침
 
-SG스크린골프 카운터 직원이 쓰는 **방문 도장 관리**(소유자 2026-11-19, 임시 기능). Cloudflare Workers + D1, 주소 `sg.isocompany.co.kr`.
+SG스크린골프 카운터 직원이 쓰는 **방문 도장 관리**(소유자 2026-11-19, 임시 기능). Cloudflare Workers + Durable Object(SQLite), 주소 `sg.isocompany.co.kr`.
 
 ## 소유자가 정한 것 (2026-11-19)
 
+- **소유자가 할 일이 없어야 한다.** 저장소를 Workers Builds 에 한 번 연결하면 끝이다. 데이터베이스를 따로 만들거나 비밀값을 넣지 않는다.
+  그래서 저장소는 Durable Object 안의 SQLite 다(배포하면 Cloudflare 가 스스로 만든다). D1 이나 비밀값을 다시 들이지 않는다.
+- **로그인·보안 작업은 하지 않는다**("보안작업 없어도 돼요"). 주소를 아는 사람만 쓰는 카운터 화면이다.
+  비용이 없는 것만 둔다: 다른 사이트에서 보낸 쓰기 요청 거절(`origin`), 검색 엔진 제외(`noindex`).
 - 쓰는 사람은 **카운터 직원뿐**이다. 손님이 보는 화면은 없다.
-- 로그인은 **매장 PIN** 하나다. 값은 Cloudflare 비밀값 `STORE_PIN` 에만 둔다(저장소·D1·화면에 없다).
 - 카드는 **30칸**(`src/config.ts` 의 `goal`). 다 채우면 **보상 처리 후 새 카드**. 지난 카드는 기록으로 남긴다.
-- 사용자에게 보이는 글은 모두 한국어(해요체 짧은 문장). 화면은 토스식(회색 바탕 · 흰 카드 · 파랑 하나로 행동).
+- **도장은 한 번에 여러 개 찍을 수 있다**(서비스로 더 줄 때). 남은 칸까지만 고를 수 있고, 찍은 직후 토스트의 "되돌리기"로 그만큼 지운다.
+- **화면은 토스식**: 흰 바탕 · 큰 제목 한 줄 · 아래 고정 파란 버튼 하나 · 회색은 정보, 파랑은 행동 · Pretendard. 글은 해요체 짧은 문장.
 
 ## 불변식
 
-- **숫자는 `src/config.ts` 한 곳.** 칸 수·로그인 유지 기간·PIN 잠금·목록 개수.
-- **도장 수는 따로 세어 두지 않는다.** `stamps` 줄을 센다(두 값이 어긋날 일이 없게). 칸을 넘지 않게 하는 것은 SQL 한 문장이다(`addStamp`: 두 기기가 동시에 눌러도 30을 넘지 않는다).
-- **보상은 한 묶음이다**(`reward`): 지금 카드를 보상 완료로 닫는 것과 새 카드를 여는 것이 같은 트랜잭션. 회원마다 열린 카드는 하나(`cards_open` 부분 유일 색인).
-- **전화번호는 숫자만 저장하고 하이픈은 화면에서만 넣는다.** 같은 번호는 한 명뿐(`members.phone UNIQUE`).
-- **회원 지우기는 진짜로 지운다**(도장·카드까지). 개인정보를 남기지 않는다.
-- **PIN 을 바꾸면 모든 기기의 로그인이 풀린다**(세션 서명 키 = 서버가 처음 만든 무작위 값 + PIN). PIN 을 `maxFails` 번 틀리면 그 IP 는 `lockMinutes` 분 막힌다.
-- **상태를 바꾸는 API 는 같은 주소에서 온 요청만 받는다**(`origin` 확인) + 쿠키 `SameSite=Strict`.
-- **화면은 받은 글자를 글자 노드로만 넣는다**(`innerHTML` 을 쓰지 않는다). CSP 가 바깥 스크립트·인라인 스타일을 막는다(`public/_headers`). 모양 값은 `el.style`(CSSOM)으로만 넣는다.
+- **숫자는 `src/config.ts` 한 곳.**
+- **도장 수는 따로 세어 두지 않는다.** `stamps` 줄을 센다. 칸을 넘지 않게 하는 것은 SQL 한 문장이다(`addStamps`: 두 기기가 동시에 눌러도 30을 넘지 않고, 모자라면 하나도 찍지 않는다).
+- **보상은 한 묶음이다**(`reward`): 지금 카드를 닫고 새 카드를 여는 것이 같은 트랜잭션. 회원마다 열린 카드는 하나(`cards_open` 부분 유일 색인).
+- **전화번호는 숫자만 저장하고 하이픈은 화면에서만.** 같은 번호는 한 명뿐(`members.phone UNIQUE`).
+- **회원 삭제는 진짜로 지운다**(도장·카드까지).
+- **스키마는 `src/schema.ts` 의 `MIGRATIONS`**. 적용한 묶음은 고치지 않고 새 묶음을 뒤에 더한다(Durable Object 가 켜질 때 적용, 테스트도 같은 목록).
+  `wrangler.jsonc` 의 Durable Object `migrations` 도 이미 배포한 tag 는 고치지 않는다.
+- **`store.ts` 는 저장소를 모른다**(`Db` 표면만). 운영은 `do.ts` 의 SQLite 어댑터, 테스트는 `node:sqlite`.
+- **화면은 받은 글자를 글자 노드로만 넣는다**(`innerHTML` 금지). CSP 가 바깥 스크립트·인라인 스타일을 막는다(`public/_headers`). 모양 값은 `el.style`(CSSOM)으로만.
 - **색은 `public/app.css` 의 `:root` 토큰 한 곳**(밝은·어두운 화면).
-- **화면 파일은 로그인 없이 나간다**(데이터가 없다). `/api/*` 만 Worker 를 지나 PIN 쿠키를 확인한다(`wrangler.jsonc` 의 `run_worker_first`).
-- **적용된 마이그레이션은 고치지 않는다.** `migrations/` 에 새 번호 파일을 더한다.
+- **"되돌리기" 토스트는 그 회원 화면에서만 산다**(화면을 옮기면 지운다. 다른 회원의 도장을 되돌리지 않게).
 
 ## 구조
 
 | 경로 | 역할 |
 |---|---|
-| `src/index.ts` | 라우터(`/api/*`) |
-| `src/auth.ts` | PIN 확인 · 잠금 · 세션 쿠키 |
-| `src/store.ts` | D1 읽기·쓰기(회원·카드·도장·보상) |
-| `src/config.ts` · `phone.ts` | 숫자 한 곳 / 전화번호 정리 |
-| `public/` | 화면(`index.html` · `app.js` · `app.css`, 빌드 없음) |
-| `migrations/` | D1 스키마 |
+| `src/index.ts` | `/api/*` 를 Durable Object 로 넘긴다. 화면 파일은 Cloudflare 가 바로 낸다 |
+| `src/do.ts` | Durable Object(`Store`): SQLite 어댑터 · 스키마 적용 |
+| `src/api.ts` | API 경로 |
+| `src/store.ts` | 읽기·쓰기(회원·카드·도장·보상) |
+| `src/schema.ts` · `config.ts` · `phone.ts` | 스키마 / 숫자 한 곳 / 전화번호 정리 |
+| `public/` | 화면(`index.html` · `app.js` · `app.css` · `fonts/`, 빌드 없음) |
 | `test/` | 실제 SQLite(`node:sqlite`) 위에서 API 를 끝까지 돌린다 |
 
-검증: `npm run verify` (타입 검사 + 테스트). 화면은 `npm run dev` 로 띄워 확인한다.
+검증: `npm run verify` (타입 검사 + 테스트). 화면은 `npm run dev` 로 띄워 확인한다(로컬 Durable Object 까지 돈다).
