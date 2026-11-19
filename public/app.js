@@ -61,14 +61,18 @@ const validPhone = (s) => /^0\d{8,10}$/.test(onlyDigits(s));
 const looksLikePhone = (s) => /^[\d\s-]+$/.test(s);
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDate = (ms) => { const d = new Date(ms); return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`; };
-function fmtWhen(ms) {
+/** withTime: 오늘·어제가 아니어도 시각까지(칸에 마우스를 올렸을 때) */
+function fmtWhen(ms, withTime = false) {
   const d = new Date(ms), now = new Date();
   const t = `${d.getHours() < 12 ? '오전' : '오후'} ${d.getHours() % 12 || 12}:${pad(d.getMinutes())}`;
   if (d.toDateString() === now.toDateString()) return `오늘 ${t}`;
   const y = new Date(now); y.setDate(now.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return `어제 ${t}`;
-  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  const day = `${d.getFullYear() === now.getFullYear() ? '' : `${d.getFullYear()}년 `}${d.getMonth() + 1}월 ${d.getDate()}일`;
+  return withTime ? `${day} ${t}` : day;
 }
+/** 도장 칸에 적는 날짜: 11.19 */
+const fmtMD = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}.${d.getDate()}`; };
 
 class ApiError extends Error { constructor(status, body) { super(body?.error ?? '잠시 후 다시 시도해 주세요'); this.status = status; this.body = body ?? {}; } }
 async function api(method, path, body) {
@@ -327,10 +331,14 @@ function renderMember(m, fresh = 0) {
   const last = m.stamps[m.stamps.length - 1];
   const after = (r, n = 0) => { renderMember(r, n); refreshSide(); };
 
-  const grid = h('div', { class: 'grid', role: 'img', 'aria-label': `도장 ${m.count}개, ${m.goal}칸` },
+  // 찍은 칸에는 찍은 날짜(월.일)를 적는다(소유자 2026-11-19). 칸에 마우스를 올리면 시각까지
+  const grid = h('div', { class: 'grid', role: 'list', 'aria-label': `도장 ${m.count}개, ${m.goal}칸` },
     ...Array.from({ length: m.goal }, (_, i) => {
-      const on = i < m.count;
-      return h('span', { class: `stamp num${on ? ' on' : ''}${on && i >= m.count - fresh ? ' new' : ''}` }, on ? icon('check', 18, 3) : String(i + 1));
+      const at = m.stamps[i];
+      if (at === undefined) return h('span', { class: 'stamp num', role: 'listitem', 'aria-label': `${i + 1}번째 칸 비어 있음` }, String(i + 1));
+      const when = fmtWhen(at, true);
+      return h('span', { class: `stamp on num${i >= m.count - fresh ? ' new' : ''}`, role: 'listitem', title: when, 'aria-label': `${i + 1}번째 도장 ${when}` },
+        h('span', { class: 'stamp-date' }, fmtMD(at)));
     }));
 
   const undoOne = h('button', { class: 'small-btn' }, '하나 빼기');
