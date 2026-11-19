@@ -1,14 +1,15 @@
-// `/api/*`. 로그인은 없다(소유자 2026-11-19 "보안작업 없어도 돼요"). 주소를 아는 사람만 쓰는 카운터 화면이다.
+// `/api/*`. 매장 PIN 4자리로 들어온다(`auth.ts`). `/api/login` 밖의 모든 경로는 로그인 쿠키가 있어야 한다.
 // 다른 사이트가 이 주소로 요청을 보내 도장을 찍지 못하게, 상태를 바꾸는 요청은 같은 주소에서 온 것만 받는다(브라우저가 붙이는 origin).
 
+import { CLEAR_COOKIE, login, validSession } from './auth.js';
 import { CONFIG } from './config.js';
 import {
   addStamps, createMember, deleteMember, DuplicatePhone, getMember, InputError, removeStamps, reward, searchMembers, updateMember,
   type Db,
 } from './store.js';
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers } });
 
 export async function api(req: Request, url: URL, db: Db, now: number): Promise<Response> {
   try {
@@ -26,7 +27,18 @@ async function route(req: Request, url: URL, db: Db, now: number): Promise<Respo
   const method = req.method;
   if (method !== 'GET' && req.headers.get('origin') !== url.origin) return json({ error: '같은 주소에서만 쓸 수 있어요' }, 403);
 
-  if (path === '/api/config' && method === 'GET') return json({ goal: CONFIG.goal });
+  if (path === '/api/login' && method === 'POST') {
+    const body = await readJson(req);
+    const pin = typeof body.pin === 'string' ? body.pin : '';
+    const r = await login(db, pin, req.headers.get('cf-connecting-ip') ?? 'unknown', now);
+    if (r.ok) return json({ ok: true, goal: CONFIG.goal }, 200, { 'set-cookie': r.cookie });
+    if (r.status === 429) return json({ error: `너무 많이 틀렸어요. ${Math.ceil(r.retryAfterSec / 60)}분 뒤에 다시 해 주세요` }, 429, { 'retry-after': String(r.retryAfterSec) });
+    return json({ error: 'PIN이 맞지 않아요', left: r.left }, 401);
+  }
+  if (path === '/api/logout' && method === 'POST') return json({ ok: true }, 200, { 'set-cookie': CLEAR_COOKIE });
+  if (!(await validSession(db, req, now))) return json({ error: 'PIN을 입력해 주세요' }, 401);
+
+  if (path === '/api/config' && method === 'GET') return json({ goal: CONFIG.goal, pinLength: CONFIG.pinLength });
 
   if (path === '/api/members') {
     if (method === 'GET') return json({ items: await searchMembers(db, url.searchParams.get('q') ?? '') });
