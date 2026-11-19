@@ -1,0 +1,21 @@
+// SG스크린골프 방문 도장(카운터 직원용). 배포는 Workers Builds 가 main 을 받아 `npm run deploy` 로 한다(docs/DEPLOY.md).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sg-stamp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // workers.dev 주소는 만들지 않는다. 주소는 sg.isocompany.co.kr 하나다
+  "workers_dev": false,
+  "routes": [{ "pattern": "sg.isocompany.co.kr", "custom_domain": true }],
+
+  // 화면 파일은 데이터가 없어 Cloudflare 가 바로 내준다. /api/* 만 Worker 가 받는다(로그인 확인)
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+
+  // D1 은 소유자가 Cloudflare 대시보드에서 만든다(이름 sg-stamp). database_id 는 비밀값이 아니다
+  "d1_databases": [
+    { "binding": "DB", "database_name": "sg-stamp", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+  ],
+
+  "observability": { "enabled": true }
+}

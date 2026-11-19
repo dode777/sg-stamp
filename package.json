@@ -1,0 +1,21 @@
+{
+  "name": "sg-stamp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SG스크린골프 방문 도장(30회) 관리 — 카운터 직원용 (Cloudflare Workers · D1)",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "wrangler d1 migrations apply sg-stamp --local && wrangler dev",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run test",
+    "deploy": "wrangler d1 migrations apply sg-stamp --remote && wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260702.1",
+    "@types/node": "22.20.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.158.0"
+  }
+}
