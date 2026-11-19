@@ -1,7 +1,7 @@
-// 테스트용 D1: 실제 SQLite(node:sqlite) 위에 D1 이 쓰는 표면만 얹는다. 마이그레이션을 번호 순서로 모두 적용한다.
-// batch 는 D1 처럼 한 트랜잭션이다(하나가 실패하면 모두 되돌린다). 외래 키도 D1 처럼 켠다.
+// 테스트용 저장소: 실제 SQLite(node:sqlite) 위에 store.ts 가 쓰는 표면만 얹는다. 스키마는 운영과 같은 src/schema.ts.
+// batch 는 운영처럼 한 트랜잭션이다(하나가 실패하면 모두 되돌린다). 외래 키도 켠다.
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, readdirSync } from 'node:fs';
+import { MIGRATIONS, MIGRATIONS_TABLE } from '../../src/schema.js';
 
 type Row = Record<string, unknown>;
 type Meta = { changes: number; rows_written: number };
@@ -22,8 +22,8 @@ export interface FakeD1 {
 export function fakeD1(): FakeD1 {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
-  const dir = new URL('../../migrations/', import.meta.url);
-  for (const f of readdirSync(dir).filter((x) => x.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(f, dir), 'utf8'));
+  db.exec(MIGRATIONS_TABLE);
+  MIGRATIONS.forEach((stmts, i) => { for (const s of stmts) db.exec(s); db.prepare('INSERT INTO _migrations (id, at) VALUES (?, 0)').run(i + 1); });
 
   const make = (sql: string): FakeStmt => {
     let args: unknown[] = [];

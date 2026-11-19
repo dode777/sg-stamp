@@ -1,5 +1,5 @@
-// SG스크린골프 도장 화면(카운터 직원용). 받은 글자는 늘 글자 노드로 넣는다(HTML 로 해석하지 않는다).
-// 화면은 셋이다: 회원 찾기(#/) · 회원(#/m/번호) · 등록·수정(#/new, #/m/번호/edit). 로그인이 없으면 PIN 화면.
+// SG스크린골프 도장 화면(카운터 직원용, 토스식). 받은 글자는 늘 글자 노드로 넣는다(HTML 로 해석하지 않는다).
+// 화면은 셋이다: 회원 찾기(#/) · 회원(#/m/번호) · 등록·수정(#/new, #/m/번호/edit).
 
 const app = document.getElementById('app');
 const layer = document.getElementById('layer');
@@ -19,20 +19,21 @@ function h(tag, props, ...kids) {
   for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;
 }
+const show = (...nodes) => app.replaceChildren(...nodes.filter(Boolean));
 
 const ICON = {
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm9 16-3.5-3.5',
-  x: 'M18 6 6 18M6 6l12 12',
+  x: 'M17 7 7 17M7 7l10 10',
   back: 'm15 18-6-6 6-6',
-  plus: 'M12 5v14M5 12h14',
+  chevron: 'm9 6 6 6-6 6',
   check: 'M20 6 9 17l-5-5',
-  gift: 'M20 12v9H4v-9M2 7h20v5H2zM12 21V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zm0 0h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z',
-  info: 'M12 16v-4M12 8h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z',
+  minus: 'M5 12h14',
+  plus: 'M12 5v14M5 12h14',
 };
-function icon(name, size = 20) {
+function icon(name, size = 20, width = 2.2) {
   const ns = 'http://www.w3.org/2000/svg';
   const s = document.createElementNS(ns, 'svg');
-  for (const [k, v] of Object.entries({ width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2.2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) s.setAttribute(k, String(v));
+  for (const [k, v] of Object.entries({ width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': width, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) s.setAttribute(k, String(v));
   const p = document.createElementNS(ns, 'path');
   p.setAttribute('d', ICON[name]);
   s.append(p);
@@ -48,17 +49,18 @@ function fmtPhone(d) {
   if (d.length <= 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
   return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7, 11)}`;
 }
+const validPhone = (s) => /^0\d{8,10}$/.test(onlyDigits(s));
+const looksLikePhone = (s) => /^[\d\s-]+$/.test(s);
 const pad = (n) => String(n).padStart(2, '0');
-function fmtDate(ms) { const d = new Date(ms); return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`; }
+const fmtDate = (ms) => { const d = new Date(ms); return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`; };
 function fmtWhen(ms) {
   const d = new Date(ms), now = new Date();
-  const t = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const t = `${d.getHours() < 12 ? '오전' : '오후'} ${d.getHours() % 12 || 12}:${pad(d.getMinutes())}`;
   if (d.toDateString() === now.toDateString()) return `오늘 ${t}`;
   const y = new Date(now); y.setDate(now.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return `어제 ${t}`;
-  return `${fmtDate(ms)} ${t}`;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
-const isToday = (ms) => new Date(ms).toDateString() === new Date().toDateString();
 
 class ApiError extends Error { constructor(status, body) { super(body?.error ?? '잠시 후 다시 시도해 주세요'); this.status = status; this.body = body ?? {}; } }
 async function api(method, path, body) {
@@ -69,18 +71,22 @@ async function api(method, path, body) {
     throw new ApiError(0, { error: '인터넷 연결을 확인해 주세요' });
   }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && path !== '/api/login') { showLogin(); throw new ApiError(401, data); }
   if (!res.ok) throw new ApiError(res.status, data);
   return data;
 }
 
 let toastTimer;
-function toast(text) {
+/** 아래 토스트. 할 일 단추(되돌리기)를 하나 달 수 있다 */
+function toast(text, action) {
   document.querySelector('.toast')?.remove();
-  const t = h('div', { class: 'toast', role: 'status' }, text);
-  document.body.append(t);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 2200);
+  const t = h('div', { class: 'toast', role: 'status', 'data-at': Date.now() }, h('span', null, text),
+    action ? h('button', { onclick: () => { t.remove(); action.run(); } }, action.label) : null);
+  // 아래 고정 버튼이 있으면 그 위에 띄운다
+  const bar = document.querySelector('.cta');
+  if (bar) t.style.setProperty('--toast-bottom', `${bar.offsetHeight - 8}px`);
+  document.body.append(t);
+  toastTimer = setTimeout(() => t.remove(), action ? 4000 : 2400);
 }
 
 /** 아래에서 올라오는 확인 창. 고르면 true */
@@ -94,101 +100,68 @@ function confirmSheet({ title, body, ok, tone = 'primary' }) {
     layer.replaceChildren(
       h('div', { class: 'scrim', onclick: () => close(false) }),
       h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-        h('span', { class: 'grab' }), h('h3', null, title), body ? h('p', null, body) : null,
-        h('div', { class: 'row-btns' }, h('button', { class: 'btn gray', onclick: () => close(false) }, '닫기'), okBtn)),
+        h('h3', null, title), body ? h('p', null, body) : null,
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn secondary', onclick: () => close(false) }, '닫기'), okBtn)),
     );
     okBtn.focus();
   });
 }
 
-// ───────── 로그인 ─────────
-
-function showLogin() {
-  layer.replaceChildren();
-  const input = h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'current-password', maxlength: 12, 'aria-label': '매장 PIN', placeholder: '••••' });
-  const err = h('p', { class: 'err', role: 'alert' });
-  const btn = h('button', { class: 'btn primary big', type: 'submit' }, '들어가기');
-  const form = h('form', { class: 'card', onsubmit: async (e) => {
-    e.preventDefault();
-    if (!input.value) { input.focus(); return; }
-    btn.disabled = true;
-    try {
-      await api('POST', '/api/login', { pin: input.value });
-      route();
-    } catch (x) {
-      err.textContent = x.message;
-      field.classList.add('bad');
-      input.value = '';
-      input.focus();
-    } finally { btn.disabled = false; }
-  } });
-  const field = h('div', { class: 'field pin' }, h('label', null, '매장 PIN'), input, err);
-  form.append(h('div', { style: { display: 'flex', flexDirection: 'column', gap: '20px' } }, field, btn));
-  app.replaceChildren(h('section', { class: 'login' },
-    h('div', { class: 'brand' }, h('img', { src: '/favicon.svg', alt: '' }), h('h1', null, 'SG스크린골프'), h('p', null, '방문 도장 관리')),
-    form));
-  input.focus();
-}
+const cta = (...kids) => h('div', { class: 'cta' }, h('div', { class: 'cta-inner' }, ...kids));
+const backBtn = (onclick) => h('button', { class: 'icon-btn', 'aria-label': '뒤로', onclick }, icon('back', 24));
 
 // ───────── 회원 찾기 ─────────
 
 let lastQuery = '';
-function header() {
-  return h('header', { class: 'top' },
-    h('div', { class: 'brand' }, h('img', { src: '/favicon.svg', alt: '' }), h('h1', null, 'SG 도장')),
-    h('button', { class: 'ghost', onclick: async () => {
-      if (!(await confirmSheet({ title: '로그아웃할까요?', body: '다시 들어오려면 매장 PIN 이 필요해요.', ok: '로그아웃' }))) return;
-      await api('POST', '/api/logout').catch(() => {});
-      showLogin();
-    } }, '로그아웃'));
-}
 
-function memberItem(m) {
-  const full = m.count >= GOAL;
-  const fill = h('span');
-  fill.style.width = `${Math.min(100, (m.count / GOAL) * 100)}%`;
-  return h('button', { class: 'item', onclick: () => go(`#/m/${m.id}`) },
-    h('span', { class: `avatar${full ? ' full' : ''}`, 'aria-hidden': 'true' }, m.name.slice(0, 1)),
-    h('span', { class: 'who' }, h('span', { class: 'name' }, m.name), h('span', { class: 'phone num' }, fmtPhone(m.phone))),
-    h('span', { class: 'prog' },
-      full ? h('span', { class: 'badge' }, '보상 대기') : h('span', { class: 'count num' }, String(m.count), h('small', null, ` / ${GOAL}`)),
-      h('span', { class: 'bar', 'aria-hidden': 'true' }, fill)));
+function memberRow(m) {
+  const ready = m.count >= GOAL;
+  return h('button', { class: 'row', onclick: () => go(`#/m/${m.id}`) },
+    h('span', { class: `avatar${ready ? ' ready' : ''}`, 'aria-hidden': 'true' }, m.name.slice(0, 1)),
+    h('span', { class: 'who' }, h('b', null, m.name), h('span', { class: 'num' }, fmtPhone(m.phone))),
+    h('span', { class: 'right num' },
+      ready ? h('span', { class: 'pill' }, '보상 가능') : [String(m.count), h('span', { class: 'of' }, `/${GOAL}`)],
+      icon('chevron', 18)));
 }
 
 function showHome() {
-  const input = h('input', { type: 'search', inputmode: 'search', placeholder: '이름 또는 전화번호 뒷자리', 'aria-label': '회원 찾기', value: lastQuery, enterkeyhint: 'search' });
-  const clear = h('button', { class: 'clear', 'aria-label': '지우기', onclick: () => { input.value = ''; lastQuery = ''; load(); input.focus(); } }, icon('x', 18));
-  const list = h('div', { class: 'list' });
-  const title = h('h2', null, '최근 방문');
-  const sub = h('span', { class: 'sub num' });
-  const body = h('section', { class: 'card tight' },
-    h('div', { class: 'section-title' }, h('div', null, title, ' ', sub),
-      h('button', { class: 'btn soft small', onclick: () => go(`#/new${/\d{3,}/.test(input.value) ? `?phone=${onlyDigits(input.value)}` : ''}`) }, icon('plus', 18), '새 회원')),
-    list);
-  app.replaceChildren(header(), h('label', { class: 'search' }, icon('search'), input, clear), body);
+  const input = h('input', { type: 'search', inputmode: 'search', placeholder: '이름이나 전화번호 뒷자리', 'aria-label': '회원 찾기', value: lastQuery, enterkeyhint: 'search', autocomplete: 'off' });
+  const clear = h('button', { class: 'clear', 'aria-label': '지우기', onclick: () => { input.value = ''; load(); input.focus(); } }, icon('x', 14, 3));
+  const label = h('div', { class: 'label' });
+  const list = h('div', { class: 'list' }, h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }));
+  const newBtn = h('button', { class: 'btn primary' }, '새 회원 등록');
+  newBtn.addEventListener('click', () => {
+    const q = input.value.trim();
+    go(`#/new${looksLikePhone(q) && onlyDigits(q).length >= 4 ? `?phone=${onlyDigits(q)}` : ''}`);
+  });
+
+  show(h('div', { class: 'page' },
+    h('div', { class: 'nav' }, h('div', { class: 'brand' }, h('img', { src: '/favicon.svg', alt: '' }), 'SG스크린골프')),
+    h('h1', { class: 'title' }, '누구에게 도장을', h('br'), '찍어 드릴까요?'),
+    h('label', { class: 'search' }, icon('search', 20), input, clear),
+    label, list), cta(newBtn));
 
   let seq = 0, timer;
   async function load() {
     const q = input.value.trim();
     lastQuery = q;
     clear.style.visibility = q ? 'visible' : 'hidden';
-    title.textContent = q ? '찾은 회원' : '최근 방문';
     const mine = ++seq;
     try {
       const r = await api('GET', `/api/members?q=${encodeURIComponent(q)}`);
       if (mine !== seq) return;
-      sub.textContent = r.items.length ? `${r.items.length}명` : '';
-      if (r.items.length) { list.replaceChildren(...r.items.map(memberItem)); return; }
-      const asPhone = onlyDigits(q).length >= 10;
+      label.textContent = q ? `찾은 회원 ${r.items.length}명` : r.items.length ? '최근 방문한 회원' : '';
+      const asPhone = looksLikePhone(q) && validPhone(q);
+      newBtn.textContent = !r.items.length && asPhone ? `${fmtPhone(q)} 등록하기` : '새 회원 등록';
+      if (r.items.length) { list.replaceChildren(...r.items.map(memberRow)); return; }
       list.replaceChildren(h('div', { class: 'empty' },
-        h('p', null, q ? '찾는 회원이 없어요' : '아직 등록한 회원이 없어요'),
-        h('button', { class: 'btn primary small', onclick: () => go(`#/new${asPhone ? `?phone=${onlyDigits(q)}` : ''}`) },
-          asPhone ? `${fmtPhone(q)} 등록하기` : '새 회원 등록하기')));
+        h('b', null, q ? '찾는 회원이 없어요' : '아직 등록한 회원이 없어요'),
+        h('span', null, asPhone ? '이 번호로 새 회원을 등록할 수 있어요' : q ? '이름이나 번호를 다시 확인해 주세요' : '아래 버튼으로 첫 회원을 등록해 보세요')));
     } catch (x) {
-      if (x.status !== 401 && mine === seq) list.replaceChildren(h('div', { class: 'empty' }, h('p', null, x.message)));
+      if (mine === seq) list.replaceChildren(h('div', { class: 'empty' }, h('b', null, '목록을 불러오지 못했어요'), h('span', null, x.message)));
     }
   }
-  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 200); });
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 180); });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(timer); load(); input.blur(); } });
   load();
   if (matchMedia('(pointer: fine)').matches) input.focus();
@@ -196,88 +169,88 @@ function showHome() {
 
 // ───────── 회원 ─────────
 
-let lastStamped = 0;
 async function showMember(id) {
   let m;
   try { m = await api('GET', `/api/members/${id}`); } catch (x) {
-    if (x.status === 401) return;
-    app.replaceChildren(backBar(), h('section', { class: 'card empty' }, h('p', null, x.status === 404 ? '없는 회원이에요' : x.message)));
+    show(h('div', { class: 'page no-cta' }, h('div', { class: 'nav' }, backBtn(() => go('#/'))),
+      h('div', { class: 'empty' }, h('b', null, x.status === 404 ? '없는 회원이에요' : '불러오지 못했어요'), h('span', null, x.status === 404 ? '삭제됐을 수 있어요' : x.message))));
     return;
   }
   renderMember(m);
 }
 
-function backBar(extra) {
-  return h('header', { class: 'top' }, h('button', { class: 'back', onclick: () => go('#/') }, icon('back', 22), '회원 찾기'), extra ?? null);
-}
+/** fresh: 방금 찍은 개수(그 칸만 톡 튀어나온다) */
+function renderMember(m, fresh = 0) {
+  const left = m.goal - m.count;
+  const full = left <= 0;
+  const last = m.stamps[m.stamps.length - 1];
 
-function renderMember(m, popLast = false) {
-  const full = m.count >= m.goal;
-  const today = m.stamps.filter(isToday).length;
-  const grid = h('div', { class: 'grid', role: 'img', 'aria-label': `도장 ${m.count}개 / ${m.goal}칸` },
+  const grid = h('div', { class: 'grid', role: 'img', 'aria-label': `도장 ${m.count}개, ${m.goal}칸` },
     ...Array.from({ length: m.goal }, (_, i) => {
       const on = i < m.count;
-      return h('span', { class: `dot num${on ? ' on' : ''}${on && full ? ' full' : ''}${popLast && i === m.count - 1 ? ' last' : ''}` }, on ? icon('check', 18) : String(i + 1));
+      return h('span', { class: `stamp num${on ? ' on' : ''}${on && i >= m.count - fresh ? ' new' : ''}` }, on ? icon('check', 18, 3) : String(i + 1));
     }));
 
-  const busy = (btn, fn) => async () => {
-    btn.disabled = true;
-    try { await fn(); } catch (x) { if (x.status !== 401) toast(x.message); btn.disabled = false; }
-  };
+  const undoOne = h('button', { class: 'small-btn' }, '하나 빼기');
+  undoOne.addEventListener('click', async () => {
+    if (!(await confirmSheet({ title: '도장 하나를 뺄까요?', body: last ? `${fmtWhen(last)}에 찍은 마지막 도장을 지워요.` : '', ok: '빼기', tone: 'danger' }))) return;
+    try { renderMember(await api('POST', `/api/members/${m.id}/unstamp`, { count: 1 })); toast('도장 하나를 뺐어요'); } catch (x) { toast(x.message); }
+  });
 
-  const stampBtn = h('button', { class: 'btn primary big' }, '도장 찍기');
-  stampBtn.addEventListener('click', busy(stampBtn, async () => {
-    // 손이 미끄러져 두 번 눌리지 않게 잠깐 쉰다
-    if (Date.now() - lastStamped < 1500) { stampBtn.disabled = false; return; }
-    lastStamped = Date.now();
-    const r = await api('POST', `/api/members/${m.id}/stamp`);
-    renderMember(r, true);
-    toast(r.count >= r.goal ? `${r.goal}칸을 다 채웠어요` : `도장을 찍었어요 · ${r.count}/${r.goal}`);
-  }));
-  const rewardBtn = h('button', { class: 'btn reward big' }, icon('gift', 22), '보상 주고 새 카드 시작');
-  rewardBtn.addEventListener('click', busy(rewardBtn, async () => {
-    if (!(await confirmSheet({ title: '보상을 줬나요?', body: `${m.name}님의 카드를 보상 완료로 남기고 빈 카드를 시작해요.`, ok: '보상 완료', tone: 'reward' }))) { rewardBtn.disabled = false; return; }
-    const r = await api('POST', `/api/members/${m.id}/reward`);
-    renderMember(r);
-    toast('보상 완료. 새 카드를 시작했어요');
-  }));
-  const undoBtn = h('button', { class: 'text-btn' }, '마지막 도장 취소');
-  undoBtn.addEventListener('click', busy(undoBtn, async () => {
-    const last = m.stamps[m.stamps.length - 1];
-    if (!(await confirmSheet({ title: '마지막 도장을 취소할까요?', body: last ? `${fmtWhen(last)}에 찍은 도장 하나를 지워요.` : '', ok: '취소하기', tone: 'danger' }))) { undoBtn.disabled = false; return; }
-    const r = await api('POST', `/api/members/${m.id}/unstamp`);
-    renderMember(r);
-    toast(`도장 하나를 지웠어요 · ${r.count}/${r.goal}`);
-  }));
-
-  const last = m.stamps[m.stamps.length - 1];
-  const card = h('section', { class: 'card' },
-    h('div', { class: 'stamp-top' },
-      h('div', { class: 'big num' }, String(m.count), h('small', null, ` / ${m.goal}`)),
-      h('div', { class: 'meta' }, last ? `마지막 도장 ${fmtWhen(last)}` : '아직 도장이 없어요', m.rewards ? h('div', null, `보상 ${m.rewards}번 받음`) : null)),
+  const box = h('section', { class: 'stamp-box' },
+    h('div', { class: 'stamp-head' },
+      h('h2', null, full ? [h('em', null, `${m.goal}개`), '를 다 모았어요'] : [h('em', { class: 'num' }, `${m.count}개`), ' 모았어요']),
+      h('span', { class: 'num', style: { fontSize: '15px', color: 'var(--grey500)', whiteSpace: 'nowrap' } }, `${m.count} / ${m.goal}`)),
+    h('p', { class: 'stamp-sub' }, full ? '보상을 드리고 새 카드를 시작해 주세요' : `보상까지 ${left}개 남았어요`),
     grid,
-    full ? h('div', { class: 'notice warn' }, icon('gift'), `${m.goal}칸을 다 채웠어요. 보상을 주고 새 카드를 시작해 주세요`)
-      : today ? h('div', { class: 'notice info' }, icon('info'), `오늘 이미 ${today}번 찍었어요`) : null,
-    full ? rewardBtn : stampBtn,
-    m.count > 0 ? h('div', { class: 'actions-under' }, undoBtn) : null);
+    h('div', { class: 'stamp-foot' }, h('span', null, last ? `마지막 도장 ${fmtWhen(last)}` : '아직 찍은 도장이 없어요'), m.count > 0 ? undoOne : null));
 
-  const head = h('section', { class: 'card member-head' },
-    h('h2', null, m.name), h('span', { class: 'phone num' }, fmtPhone(m.phone)),
-    m.memo ? h('p', { class: 'memo' }, m.memo) : null);
+  const hist = m.history.length ? [
+    h('div', { class: 'label' }, `받은 보상 ${m.history.length}번`),
+    h('div', { class: 'hist' }, ...m.history.map((c, i) => h('div', null,
+      h('span', null, `${m.history.length - i}번째 카드`), h('span', { class: 'num' }, `${fmtDate(c.rewardedAt)} 보상`)))),
+  ] : [];
 
-  const hist = m.history.length ? h('section', { class: 'card' },
-    h('h3', { style: { fontSize: '17px', fontWeight: '700', marginBottom: '6px' } }, '지난 카드'),
-    h('div', { class: 'hist' }, ...m.history.map((c, i) => h('div', { class: 'h' },
-      h('span', null, `${m.history.length - i}번째 카드`), h('span', { class: 'num' }, `${fmtDate(c.startedAt)} – ${fmtDate(c.rewardedAt)} 보상`))))) : null;
+  const page = h('div', { class: 'page' },
+    h('div', { class: 'nav' }, backBtn(() => go('#/')), h('button', { class: 'nav-text', onclick: () => go(`#/m/${m.id}/edit`) }, '수정')),
+    h('h1', { class: 'title', style: { marginBottom: '2px' } }, m.name),
+    h('p', { class: 'phone-line num' }, fmtPhone(m.phone)),
+    m.memo ? h('p', { class: 'memo' }, m.memo) : null,
+    box, ...hist);
 
-  const manage = h('div', { class: 'danger-zone' },
-    h('button', { class: 'text-btn', onclick: () => go(`#/m/${m.id}/edit`) }, '정보 고치기'),
-    h('button', { class: 'text-btn red', onclick: async () => {
-      if (!(await confirmSheet({ title: `${m.name}님을 지울까요?`, body: '회원 정보와 도장 기록이 모두 지워지고 되돌릴 수 없어요.', ok: '지우기', tone: 'danger' }))) return;
-      try { await api('DELETE', `/api/members/${m.id}`); toast('회원을 지웠어요'); go('#/'); } catch (x) { if (x.status !== 401) toast(x.message); }
-    } }, '회원 지우기'));
-
-  app.replaceChildren(...[backBar(), head, card, hist, manage].filter(Boolean));
+  let bottom;
+  if (full) {
+    const rewardBtn = h('button', { class: 'btn primary' }, '보상 드리고 새 카드 시작');
+    rewardBtn.addEventListener('click', async () => {
+      if (!(await confirmSheet({ title: '보상을 드렸나요?', body: `${m.name}님의 카드를 보상 완료로 남기고 빈 카드를 새로 시작해요.`, ok: '네, 드렸어요' }))) return;
+      rewardBtn.disabled = true;
+      try { renderMember(await api('POST', `/api/members/${m.id}/reward`)); toast('새 카드를 시작했어요'); } catch (x) { rewardBtn.disabled = false; toast(x.message); }
+    });
+    bottom = cta(rewardBtn);
+  } else {
+    let qty = 1;
+    const out = h('output', { class: 'num', 'aria-live': 'polite' }, '1개');
+    const minus = h('button', { 'aria-label': '하나 적게', disabled: true }, icon('minus', 20, 2.6));
+    const plus = h('button', { 'aria-label': '하나 더', disabled: left <= 1 }, icon('plus', 20, 2.6));
+    const stampBtn = h('button', { class: 'btn primary' }, '도장 1개 찍기');
+    const setQty = (n) => { qty = n; out.textContent = `${n}개`; minus.disabled = n <= 1; plus.disabled = n >= left; stampBtn.textContent = `도장 ${n}개 찍기`; };
+    minus.addEventListener('click', () => setQty(Math.max(1, qty - 1)));
+    plus.addEventListener('click', () => setQty(Math.min(left, qty + 1)));
+    stampBtn.addEventListener('click', async () => {
+      stampBtn.disabled = true;
+      const n = qty;
+      try {
+        const r = await api('POST', `/api/members/${m.id}/stamp`, { count: n });
+        renderMember(r, n);
+        toast(r.count >= r.goal ? `${r.goal}개를 다 모았어요` : `도장 ${n}개를 찍었어요`, {
+          label: '되돌리기',
+          run: async () => { try { renderMember(await api('POST', `/api/members/${m.id}/unstamp`, { count: n })); toast('되돌렸어요'); } catch (x) { toast(x.message); } },
+        });
+      } catch (x) { stampBtn.disabled = false; toast(x.message); }
+    });
+    bottom = cta(h('div', { class: 'qty' }, h('span', null, '찍을 개수'), h('div', { class: 'stepper' }, minus, out, plus)), stampBtn);
+  }
+  show(page, bottom);
 }
 
 // ───────── 등록·수정 ─────────
@@ -285,63 +258,70 @@ function renderMember(m, popLast = false) {
 async function showForm(id) {
   let m = null;
   if (id) {
-    try { m = await api('GET', `/api/members/${id}`); } catch (x) { if (x.status !== 401) toast(x.message); return; }
+    try { m = await api('GET', `/api/members/${id}`); } catch (x) { toast(x.message); go('#/', true); return; }
   }
   const preset = new URLSearchParams(location.hash.split('?')[1] ?? '').get('phone') ?? '';
   const fields = {};
-  const mk = (key, label, input, hint) => {
+  let check = () => {};
+  const field = (key, label, input) => {
     const err = h('p', { class: 'err', role: 'alert' });
-    const f = h('div', { class: 'field' }, h('label', { for: `f-${key}` }, label), input, hint ? h('p', { class: 'hint' }, hint) : null, err);
+    const f = h('div', { class: 'field' }, h('label', { for: `f-${key}` }, label), input, err);
     input.id = `f-${key}`;
-    input.addEventListener('input', () => { f.classList.remove('bad'); err.replaceChildren(); });
+    input.addEventListener('input', () => { f.classList.remove('bad'); err.replaceChildren(); check(); });
     fields[key] = { f, err, input };
     return f;
   };
-  const name = h('input', { autocomplete: 'off', maxlength: 30, value: m?.name ?? '', placeholder: '홍길동', enterkeyhint: 'next' });
-  const phone = h('input', { type: 'tel', inputmode: 'numeric', autocomplete: 'off', value: fmtPhone(m?.phone ?? preset), placeholder: '010-0000-0000', enterkeyhint: 'next' });
+  const name = h('input', { autocomplete: 'off', maxlength: 30, value: m?.name ?? '', placeholder: '이름', enterkeyhint: 'next' });
+  const phone = h('input', { type: 'tel', inputmode: 'numeric', autocomplete: 'off', value: fmtPhone(m?.phone ?? preset), placeholder: '010-0000-0000', enterkeyhint: 'done' });
   phone.addEventListener('input', () => { phone.value = fmtPhone(phone.value); });
-  const memo = h('textarea', { maxlength: 200, placeholder: '예: 주말 오전 / 왼손잡이' });
+  const memo = h('textarea', { maxlength: 200, placeholder: '예: 주말 오전에 자주 와요' });
   memo.value = m?.memo ?? '';
-  const save = h('button', { class: 'btn primary big', type: 'submit' }, m ? '저장하기' : '등록하기');
+  const save = h('button', { class: 'btn primary' }, m ? '저장하기' : '등록하기');
+  check = () => { save.disabled = !name.value.trim() || !validPhone(phone.value); };
+  check();
 
-  const form = h('form', { class: 'card', onsubmit: async (e) => {
-    e.preventDefault();
+  save.addEventListener('click', async () => {
     save.disabled = true;
     try {
       const body = { name: name.value, phone: phone.value, memo: memo.value };
       const r = m ? await api('PUT', `/api/members/${m.id}`, body) : await api('POST', '/api/members', body);
-      toast(m ? '저장했어요' : '등록했어요');
+      toast(m ? '저장했어요' : `${name.value.trim().replace(/\s+/g, ' ')}님을 등록했어요`);
       go(`#/m/${m ? m.id : r.id}`, true);
     } catch (x) {
-      if (x.status === 401) return;
+      check();
       const t = fields[x.body.field];
       if (!t) { toast(x.message); return; }
       t.f.classList.add('bad');
       t.err.replaceChildren(x.message);
-      if (x.body.memberId) t.err.append(' ', h('button', { class: 'text-btn', type: 'button', onclick: () => go(`#/m/${x.body.memberId}`) }, '그 회원 보기'));
+      if (x.body.memberId) t.err.append(h('button', { class: 'link-btn', onclick: () => go(`#/m/${x.body.memberId}`) }, '그 회원 보기'));
       t.input.focus();
-    } finally { save.disabled = false; }
-  } },
-  h('div', { style: { display: 'flex', flexDirection: 'column', gap: '20px' } },
-    h('h2', { style: { fontSize: '22px', fontWeight: '700' } }, m ? '회원 정보 고치기' : '새 회원'),
-    mk('name', '이름', name),
-    mk('phone', '전화번호', phone, '같은 번호는 한 명만 등록할 수 있어요'),
-    mk('memo', '메모 (선택)', memo),
-    save));
+    }
+  });
 
-  app.replaceChildren(h('header', { class: 'top' }, h('button', { class: 'back', onclick: () => history.back() }, icon('back', 22), m ? m.name : '회원 찾기')), form);
-  name.focus();
+  const del = m ? h('button', { class: 'danger-link', onclick: async () => {
+    if (!(await confirmSheet({ title: `${m.name}님을 삭제할까요?`, body: '회원 정보와 도장 기록이 모두 지워지고 되돌릴 수 없어요.', ok: '삭제하기', tone: 'danger' }))) return;
+    try { await api('DELETE', `/api/members/${m.id}`); toast('회원을 삭제했어요'); go('#/', true); } catch (x) { toast(x.message); }
+  } }, '회원 삭제') : null;
+
+  show(h('div', { class: 'page' },
+    h('div', { class: 'nav' }, backBtn(() => history.back())),
+    h('h1', { class: 'title' }, m ? '회원 정보를 고칠게요' : '새 회원을 등록할게요'),
+    field('name', '이름', name), field('phone', '전화번호', phone), field('memo', '메모 (선택)', memo), del), cta(save));
+  if (!m) name.focus();
 }
 
 // ───────── 길 찾기 ─────────
 
 function go(hash, replace = false) {
-  if (replace) location.replace(hash); else location.hash = hash;
+  if (replace) { location.replace(hash); return; }
+  if (location.hash === hash) route(); else location.hash = hash;
 }
 
-async function route() {
+function route() {
   layer.replaceChildren();
-  document.querySelector('.toast')?.remove();
+  // 화면을 옮기면 앞 화면의 토스트는 지운다("되돌리기"가 다른 회원의 도장을 되돌리지 않게).
+  // 옮기기 직전에 띄운 것("등록했어요")은 새 화면에서 보여야 하니 남긴다
+  for (const t of document.querySelectorAll('.toast')) if (t.querySelector('button') || Date.now() - Number(t.dataset.at) > 800) t.remove();
   window.scrollTo(0, 0);
   const hash = location.hash.split('?')[0] || '#/';
   const mm = /^#\/m\/(\d+)(\/edit)?$/.exec(hash);
@@ -351,12 +331,4 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
-(async () => {
-  try {
-    const me = await api('GET', '/api/me');
-    GOAL = me.goal ?? GOAL;
-    route();
-  } catch (x) {
-    if (x.status !== 401) app.replaceChildren(h('section', { class: 'card empty' }, h('p', null, x.message)));
-  }
-})();
+api('GET', '/api/config').then((c) => { GOAL = c.goal ?? GOAL; }).catch(() => {}).finally(route);
