@@ -32,6 +32,12 @@ export const MIGRATIONS: string[][] = [
     'CREATE INDEX stamps_card ON stamps(card_id)',
     'CREATE INDEX stamps_member_at ON stamps(member_id, at)',
   ],
+  [
+    // 매장 PIN(2026-11-19). 세션 서명 키처럼 서버가 스스로 만드는 값
+    'CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID',
+    // PIN 을 틀린 횟수(IP 마다)
+    'CREATE TABLE login_fails (ip TEXT PRIMARY KEY, fails INTEGER NOT NULL, first_at INTEGER NOT NULL, locked_until INTEGER) WITHOUT ROWID',
+  ],
 ];
 
 export const MIGRATIONS_TABLE = 'CREATE TABLE IF NOT EXISTS _migrations (id INTEGER PRIMARY KEY, at INTEGER NOT NULL)';

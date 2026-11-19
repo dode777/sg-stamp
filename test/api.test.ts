@@ -8,16 +8,60 @@ import { formatPhone } from '../src/phone.js';
 const ORIGIN = 'https://sg.isocompany.co.kr';
 let db: FakeD1;
 let now: number;
+let cookie = '';
+const PIN = '7779';
 
-async function call(method: string, path: string, body?: unknown, opts: { origin?: string } = {}) {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+async function call(method: string, path: string, body?: unknown, opts: { origin?: string; cookie?: string; ip?: string } = {}) {
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'cf-connecting-ip': opts.ip ?? '1.2.3.4' };
   if (method !== 'GET') headers.origin = opts.origin ?? ORIGIN;
+  const c = opts.cookie ?? cookie;
+  if (c) headers.cookie = c;
   const req = new Request(`${ORIGIN}${path}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const res = await api(req, new URL(req.url), db as unknown as Db, now);
-  return { status: res.status, body: await res.json() as Record<string, any> };
+  return { status: res.status, body: await res.json() as Record<string, any>, setCookie: res.headers.get('set-cookie') };
 }
 
-beforeEach(() => { db = fakeD1(); now = Date.UTC(2026, 10, 19, 1, 0, 0); });
+async function signIn() {
+  const r = await call('POST', '/api/login', { pin: PIN }, { cookie: '' });
+  cookie = r.setCookie!.split(';')[0]!;
+}
+
+beforeEach(async () => { db = fakeD1(); now = Date.UTC(2026, 10, 19, 1, 0, 0); cookie = ''; await signIn(); });
+
+describe('매장 PIN', () => {
+  it('PIN 은 7779 이고 코드에는 해시만 있다', async () => {
+    const { pinHashOf } = await import('../src/auth.js');
+    expect(await pinHashOf(PIN)).toBe(CONFIG.pinHash);
+    expect(JSON.stringify(CONFIG)).not.toContain(PIN);
+  });
+
+  it('로그인 없이는 회원을 볼 수 없고, 맞는 PIN 은 1년짜리 쿠키를 준다', async () => {
+    expect((await call('GET', '/api/members', undefined, { cookie: '' })).status).toBe(401);
+    const r = await call('POST', '/api/login', { pin: PIN }, { cookie: '' });
+    expect(r.setCookie).toMatch(/HttpOnly; Secure; SameSite=Strict; Max-Age=31536000/);
+    expect((await call('GET', '/api/members')).status).toBe(200);
+    now += CONFIG.sessionDays * 86_400_000 + 1;
+    expect((await call('GET', '/api/members')).status).toBe(401);
+  });
+
+  it('위조한 쿠키는 통과하지 못한다', async () => {
+    const [exp, sig] = cookie.split('=')[1]!.split('.');
+    expect((await call('GET', '/api/members', undefined, { cookie: `sg_session=${Number(exp) + 1}.${sig}` })).status).toBe(401);
+  });
+
+  it(`${CONFIG.maxFails}번 틀리면 그 IP 는 ${CONFIG.lockMinutes}분 막힌다`, async () => {
+    for (let i = 1; i < CONFIG.maxFails; i++) {
+      const r = await call('POST', '/api/login', { pin: '0000' }, { cookie: '' });
+      expect(r.status).toBe(401);
+      expect(r.body.left).toBe(CONFIG.maxFails - i);
+    }
+    expect((await call('POST', '/api/login', { pin: '0000' }, { cookie: '' })).status).toBe(429);
+    expect((await call('POST', '/api/login', { pin: PIN }, { cookie: '' })).status).toBe(429);
+    expect((await call('POST', '/api/login', { pin: PIN }, { cookie: '', ip: '5.6.7.8' })).status).toBe(200);
+    now += CONFIG.lockMinutes * 60_000;
+    expect((await call('POST', '/api/login', { pin: PIN }, { cookie: '' })).status).toBe(200);
+  });
+});
 afterEach(() => db.close());
 
 describe('바깥 요청', () => {

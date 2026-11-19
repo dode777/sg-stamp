@@ -203,6 +203,21 @@ button:disabled { cursor: default; }
 .toast button { height: 40px; padding: 0 12px; border-radius: 10px; font-size: 16px; font-weight: 700; color: var(--toast-action); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 
+/* 매장 PIN */
+.pin-page { min-height: 100dvh; padding: 0 24px calc(24px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+.pin-top { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 28px; padding: 24px 0; }
+.pin-top .title { margin: 0; }
+.pin-dots { display: flex; gap: 18px; }
+.pin-dots span { width: 16px; height: 16px; border-radius: 50%; background: var(--grey200); transition: background-color .12s, transform .12s; }
+.pin-dots span.on { background: var(--grey900); transform: scale(1.1); }
+.pin-dots.shake { animation: shake .4s; }
+@keyframes shake { 20%, 60% { transform: translateX(-10px); } 40%, 80% { transform: translateX(10px); } }
+.pin-msg { min-height: 24px; font-size: 16px; color: var(--red-text); }
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 420px; width: 100%; margin: 0 auto; }
+.key { height: 68px; border-radius: 16px; font-size: 28px; font-weight: 600; color: var(--grey900); display: flex; align-items: center; justify-content: center; transition: background-color .1s; }
+.key:active { background: var(--grey100); }
+.key svg { color: var(--grey700); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

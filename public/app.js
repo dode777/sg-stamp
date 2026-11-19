@@ -1,5 +1,5 @@
 // SG스크린골프 도장 화면(카운터 직원용, 토스식). 받은 글자는 늘 글자 노드로 넣는다(HTML 로 해석하지 않는다).
-// 화면은 셋이다: 회원 찾기(#/) · 회원(#/m/번호) · 등록·수정(#/new, #/m/번호/edit).
+// 화면은 셋이다: 회원 찾기(#/) · 회원(#/m/번호) · 등록·수정(#/new, #/m/번호/edit). 로그인이 없으면 매장 PIN 화면.
 
 const app = document.getElementById('app');
 const layer = document.getElementById('layer');
@@ -29,6 +29,7 @@ const ICON = {
   check: 'M20 6 9 17l-5-5',
   minus: 'M5 12h14',
   plus: 'M12 5v14M5 12h14',
+  erase: 'M21 5H9l-7 7 7 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zM17 9l-6 6M11 9l6 6',
 };
 function icon(name, size = 20, width = 2.2) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -71,6 +72,7 @@ async function api(method, path, body) {
     throw new ApiError(0, { error: '인터넷 연결을 확인해 주세요' });
   }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== '/api/login') { showPin(); throw new ApiError(401, data); }
   if (!res.ok) throw new ApiError(res.status, data);
   return data;
 }
@@ -78,6 +80,7 @@ async function api(method, path, body) {
 let toastTimer;
 /** 아래 토스트. 할 일 단추(되돌리기)를 하나 달 수 있다 */
 function toast(text, action) {
+  if (offKeys) return;   // PIN 화면에서는 띄우지 않는다
   document.querySelector('.toast')?.remove();
   clearTimeout(toastTimer);
   const t = h('div', { class: 'toast', role: 'status', 'data-at': Date.now() }, h('span', null, text),
@@ -110,6 +113,57 @@ function confirmSheet({ title, body, ok, tone = 'primary' }) {
 const cta = (...kids) => h('div', { class: 'cta' }, h('div', { class: 'cta-inner' }, ...kids));
 const backBtn = (onclick) => h('button', { class: 'icon-btn', 'aria-label': '뒤로', onclick }, icon('back', 24));
 
+// ───────── 매장 PIN ─────────
+
+let PIN_LEN = 4;
+let offKeys = null;
+
+/** 토스식 PIN 입력: 점 네 개 + 숫자 판. 네 자리가 차면 바로 확인한다 */
+function showPin() {
+  layer.replaceChildren();
+  document.querySelector('.toast')?.remove();
+  offKeys?.();
+  let digits = '';
+  let busy = false;
+  const dots = h('div', { class: 'pin-dots', 'aria-hidden': 'true' }, ...Array.from({ length: PIN_LEN }, () => h('span')));
+  const msg = h('p', { class: 'pin-msg', role: 'alert' });
+  const paint = () => [...dots.children].forEach((d, i) => d.classList.toggle('on', i < digits.length));
+
+  async function submit() {
+    busy = true;
+    try {
+      const r = await api('POST', '/api/login', { pin: digits });
+      GOAL = r.goal ?? GOAL;
+      offKeys?.(); offKeys = null;
+      route();
+    } catch (x) {
+      msg.textContent = x.status === 401 ? `PIN이 맞지 않아요${x.body.left <= 3 ? ` · ${x.body.left}번 더 틀리면 잠시 막혀요` : ''}` : x.message;
+      dots.classList.remove('shake'); void dots.offsetWidth; dots.classList.add('shake');
+      digits = ''; paint();
+    } finally { busy = false; }
+  }
+  function press(k) {
+    if (busy) return;
+    if (k === 'del') { digits = digits.slice(0, -1); paint(); return; }
+    if (digits.length >= PIN_LEN) return;
+    msg.textContent = '';
+    digits += k; paint();
+    if (digits.length === PIN_LEN) submit();
+  }
+  const key = (k, label) => h('button', { class: 'key num', 'aria-label': k === 'del' ? '지우기' : k, onclick: () => press(k) }, label ?? k);
+  const pad = h('div', { class: 'keypad' },
+    ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) => key(k)), h('span'), key('0'), key('del', icon('erase', 26, 2)));
+
+  const onKey = (e) => { if (/^\d$/.test(e.key)) press(e.key); else if (e.key === 'Backspace') press('del'); };
+  document.addEventListener('keydown', onKey);
+  offKeys = () => document.removeEventListener('keydown', onKey);
+
+  show(h('div', { class: 'pin-page' },
+    h('div', { class: 'nav' }, h('div', { class: 'brand' }, h('img', { src: '/favicon.svg', alt: '' }), 'SG스크린골프')),
+    h('div', { class: 'pin-top' }, h('h1', { class: 'title' }, '매장 PIN을 입력해 주세요'), dots, msg),
+    pad));
+}
+
 // ───────── 회원 찾기 ─────────
 
 let lastQuery = '';
@@ -136,7 +190,8 @@ function showHome() {
   });
 
   show(h('div', { class: 'page' },
-    h('div', { class: 'nav' }, h('div', { class: 'brand' }, h('img', { src: '/favicon.svg', alt: '' }), 'SG스크린골프')),
+    h('div', { class: 'nav' }, h('div', { class: 'brand' }, h('img', { src: '/favicon.svg', alt: '' }), 'SG스크린골프'),
+      h('button', { class: 'nav-text', onclick: async () => { await api('POST', '/api/logout').catch(() => {}); showPin(); } }, '잠그기')),
     h('h1', { class: 'title' }, '누구에게 도장을', h('br'), '찍어 드릴까요?'),
     h('label', { class: 'search' }, icon('search', 20), input, clear),
     label, list), cta(newBtn));
@@ -330,5 +385,6 @@ function route() {
   return showHome();
 }
 
-window.addEventListener('hashchange', route);
-api('GET', '/api/config').then((c) => { GOAL = c.goal ?? GOAL; }).catch(() => {}).finally(route);
+window.addEventListener('hashchange', () => { if (!offKeys) route(); });
+api('GET', '/api/config').then((c) => { GOAL = c.goal ?? GOAL; PIN_LEN = c.pinLength ?? PIN_LEN; route(); })
+  .catch((x) => { if (x.status !== 401) route(); });
