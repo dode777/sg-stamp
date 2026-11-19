@@ -13,7 +13,7 @@ Cloudflare 대시보드 → **Workers & Pages → Create → Import a repository
 ## 확인
 
 `https://sg.isocompany.co.kr` → 매장 PIN 4자리 → 새 회원 등록 → 도장 찍기.
-한 번 들어온 기기는 일주일 동안 다시 묻지 않는다. 화면 위 "잠그기"로 바로 잠근다.
+한 번 들어온 기기는 1년 동안 다시 묻지 않는다. 화면 위 "잠그기"로 바로 잠근다.
 
 ## 권하는 것: 저장소를 비공개로
 
