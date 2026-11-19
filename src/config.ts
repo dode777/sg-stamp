@@ -10,8 +10,8 @@ export const CONFIG = {
    */
   pinHash: '5ee08582e96ed5381a04a748565b0341079e55a6409342acfc9e8debe018bbc8',
   pinLength: 4,
-  /** 한 번 들어오면 이만큼 다시 묻지 않는다(소유자 2026-11-19 "일주일 유지") */
-  sessionDays: 7,
+  /** 한 번 들어오면 이만큼 다시 묻지 않는다(소유자 2026-11-19 "1년 유지할게요") */
+  sessionDays: 365,
   /** PIN 을 이만큼 틀리면 그 IP 를 잠깐 막는다(4자리를 차례로 넣어 보는 것을 막는다) */
   maxFails: 10,
   lockMinutes: 10,
