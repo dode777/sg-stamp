@@ -35,10 +35,10 @@ describe('매장 PIN', () => {
     expect(JSON.stringify(CONFIG)).not.toContain(PIN);
   });
 
-  it('로그인 없이는 회원을 볼 수 없고, 맞는 PIN 은 1년짜리 쿠키를 준다', async () => {
+  it('로그인 없이는 회원을 볼 수 없고, 맞는 PIN 은 일주일짜리 쿠키를 준다', async () => {
     expect((await call('GET', '/api/members', undefined, { cookie: '' })).status).toBe(401);
     const r = await call('POST', '/api/login', { pin: PIN }, { cookie: '' });
-    expect(r.setCookie).toMatch(/HttpOnly; Secure; SameSite=Strict; Max-Age=31536000/);
+    expect(r.setCookie).toMatch(/HttpOnly; Secure; SameSite=Strict; Max-Age=604800/);
     expect((await call('GET', '/api/members')).status).toBe(200);
     now += CONFIG.sessionDays * 86_400_000 + 1;
     expect((await call('GET', '/api/members')).status).toBe(401);
