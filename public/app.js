@@ -12,6 +12,25 @@ const isWide = () => WIDE.matches;
 const finePointer = matchMedia('(pointer: fine)');
 const kbd = (t) => (finePointer.matches ? h('span', { class: 'kbd' }, t) : null);
 
+// ───────── 앱처럼(소유자 2026-11-19 "더블탭 확대 등 웹 요소는 막아 주세요") ─────────
+// 두 번 눌러 확대·끌어 고르기·튕김은 CSS(app.css) 가 막고, 여기서는 그 밖의 웹 동작을 막는다. 입력 칸은 그대로 둔다
+{
+  const editable = (t) => t instanceof Element && !!t.closest('input, textarea');
+  // 길게 누르기·오른쪽 클릭 메뉴
+  document.addEventListener('contextmenu', (e) => { if (!editable(e.target)) e.preventDefault(); });
+  // 끌어서 옮기기(그림·글자)
+  document.addEventListener('dragstart', (e) => { if (!editable(e.target)) e.preventDefault(); });
+  // 아이폰 사파리의 두 손가락 확대(viewport 설정을 무시한다)
+  for (const g of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(g, (e) => e.preventDefault());
+  // 두 번 눌러 확대는 CSS 의 touch-action: manipulation 이 막는다. 여기서 두 번째 터치를 막으면
+  // "+"를 빠르게 두 번 누를 때 두 번째가 사라지므로 JS 로는 막지 않는다
+  // PC: Ctrl+휠(노트북 터치패드 확대)과 Ctrl + / − / 0
+  document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && ['+', '=', '-', '_', '0'].includes(e.key)) e.preventDefault();
+  });
+}
+
 // ───────── 도구 ─────────
 
 function h(tag, props, ...kids) {
@@ -203,7 +222,7 @@ function memberRow(m) {
 
 /** 찾기 칸 + 회원 목록 + 새 회원 버튼. 휴대폰의 첫 화면과 넓은 화면의 왼쪽 목록이 함께 쓴다 */
 function memberSearch() {
-  const input = h('input', { type: 'search', inputmode: 'search', placeholder: '이름이나 전화번호 뒷자리', 'aria-label': '회원 찾기', value: lastQuery, enterkeyhint: 'search', autocomplete: 'off' });
+  const input = h('input', { type: 'search', inputmode: 'search', placeholder: '이름이나 전화번호 뒷자리', 'aria-label': '회원 찾기', value: lastQuery, enterkeyhint: 'search', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' });
   const clear = h('button', { class: 'clear', 'aria-label': '지우기', onclick: () => { input.value = ''; load(); input.focus(); } }, icon('x', 14, 3));
   const label = h('div', { class: 'label' });
   const list = h('div', { class: 'list' }, h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }));
@@ -434,10 +453,10 @@ async function showForm(id) {
     fields[key] = { f, err, input };
     return f;
   };
-  const name = h('input', { autocomplete: 'off', maxlength: 30, value: m?.name ?? '', placeholder: '이름', enterkeyhint: 'next' });
+  const name = h('input', { autocomplete: 'off', maxlength: 30, value: m?.name ?? '', placeholder: '이름', enterkeyhint: 'next', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' });
   const phone = h('input', { type: 'tel', inputmode: 'numeric', autocomplete: 'off', value: fmtPhone(m?.phone ?? preset), placeholder: '010-0000-0000', enterkeyhint: 'done' });
   phone.addEventListener('input', () => { phone.value = fmtPhone(phone.value); });
-  const memo = h('textarea', { maxlength: 200, placeholder: '예: 주말 오전에 자주 와요' });
+  const memo = h('textarea', { maxlength: 200, placeholder: '예: 주말 오전에 자주 와요', spellcheck: 'false' });
   memo.value = m?.memo ?? '';
   const save = h('button', { class: 'btn primary' }, m ? '저장하기' : '등록하기');
   check = () => { save.disabled = !name.value.trim() || !validPhone(phone.value); };
