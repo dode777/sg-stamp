@@ -62,7 +62,9 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+/* 앱처럼(소유자 2026-11-19): 두 번 눌러 확대 없음(touch-action), 화면 끝에서 튕기거나 당겨서 새로고침 없음(overscroll) */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; overscroll-behavior: none; }
+body { overscroll-behavior: none; }
 body {
   margin: 0; min-height: 100dvh; background: var(--bg); color: var(--grey900);
   font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
@@ -73,6 +75,10 @@ body {
 body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: default; }
 input, textarea { -webkit-user-select: text; user-select: text; cursor: text; }
 img, svg { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
+a { -webkit-user-drag: none; }
+button { touch-action: manipulation; }
+/* 넓은 화면의 안쪽 스크롤은 그 칸 안에서만 끝난다(바깥 화면이 따라 움직이지 않게), 스크롤 막대는 얇게 */
+.side .list, .pane { overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--grey300) transparent; }
 h1, h2, h3, p { margin: 0; }
 button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
 button { cursor: pointer; border: 0; background: none; padding: 0; }
